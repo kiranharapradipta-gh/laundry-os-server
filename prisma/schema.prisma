@@ -493,6 +493,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  sessions UserSession[]
+
   memberships BusinessMember[]
   employee    Employee?
 
@@ -500,6 +502,28 @@ model User {
   auditLogs     AuditLog[]
 
   apiKeys ApiKey[]
+}
+
+model UserSession {
+  id               String    @id @default(uuid())
+  userId           String
+  businessId       String
+  refreshTokenHash String    @unique
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  lastUsedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([businessId])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 model Permission {
@@ -688,6 +712,8 @@ model Business {
   updatedAt DateTime @updatedAt
 
   settings BusinessSetting?
+
+  sessions UserSession[]
 
   apiKeys ApiKey[]
 
@@ -1086,6 +1112,8 @@ model Customer {
   firstOrderAt DateTime?
   lastOrderAt  DateTime?
 
+  deletedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1115,6 +1143,7 @@ model Customer {
 
   vouchers CustomerVoucher[]
 
+  @@index([businessId, deletedAt])
   @@unique([businessId, customerCode])
   @@index([businessId])
   @@index([businessId, phone])

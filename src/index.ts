@@ -1,21 +1,47 @@
-import "dotenv/config";
 import express from "express";
 import cors from "cors";
+
+import authRoutes from "./modules/auth/auth.routes.js";
+
+import { requestIdMiddleware } from "./middleware/request-id.middleware.js";
+import { httpLoggerMiddleware } from "./middleware/http-logger.middleware.js";
+import { notFoundMiddleware } from "./middleware/not-found.middleware.js";
+import { errorMiddleware } from "./middleware/error.middleware.js";
+
+import customerRoutes from "./modules/customers/customer.routes.js";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-app.get("/api/health", (_req, res) => {
-  res.json({
-    success: true,
-    message: "Laundry Backend is running",
-  });
-});
+app.use(requestIdMiddleware);
+app.use(httpLoggerMiddleware);
 
-const PORT = process.env.PORT || 3000;
+/*
+ * Routes
+ */
+app.use("/api/auth", authRoutes);
 
-app.listen(PORT, () => {
-  console.log(`API running at http://localhost:${PORT}`);
+app.use(
+  "/api/customers",
+  customerRoutes,
+);
+
+/*
+ * 404
+ */
+app.use(notFoundMiddleware);
+
+/*
+ * Global error handler
+ */
+app.use(errorMiddleware);
+
+const port = 3000;
+
+app.listen(port, () => {
+  console.log(
+    `API running on http://localhost:${port}`,
+  );
 });
