@@ -9,6 +9,8 @@ import { notFoundMiddleware } from "./middleware/not-found.middleware.js";
 import { errorMiddleware } from "./middleware/error.middleware.js";
 
 import customerRoutes from "./modules/customers/customer.routes.js";
+import customerTagRoutes from "./modules/customer-tags/customer-tag.routes.js";
+import customerSegmentRoutes from "./modules/customer-segments/customer-segment.routes.js";
 
 const app = express();
 
@@ -26,6 +28,16 @@ app.use("/api/auth", authRoutes);
 app.use(
   "/api/customers",
   customerRoutes,
+);
+
+app.use(
+  "/api/customer-tags",
+  customerTagRoutes,
+);
+
+app.use(
+  "/customer-segments",
+  customerSegmentRoutes,
 );
 
 /*
