@@ -25,6 +25,7 @@ export const PERMISSIONS = {
   INVENTORY_READ: "inventory.read",
   INVENTORY_CREATE: "inventory.create",
   INVENTORY_UPDATE: "inventory.update",
+  INVENTORY_DELETE: "inventory.delete",
   INVENTORY_ADJUST: "inventory.adjust",
 
   // Finance

@@ -11,6 +11,7 @@ import { errorMiddleware } from "./middleware/error.middleware.js";
 import customerRoutes from "./modules/customers/customer.routes.js";
 import customerTagRoutes from "./modules/customer-tags/customer-tag.routes.js";
 import customerSegmentRoutes from "./modules/customer-segments/customer-segment.routes.js";
+import inventoryRoutes from "./modules/inventory/inventory.routes.js";
 
 export const app = express();
 
@@ -38,6 +39,11 @@ app.use(
 app.use(
   "/api/customer-segments",
   customerSegmentRoutes,
+);
+
+app.use(
+  "/api/inventory",
+  inventoryRoutes,
 );
 
 /*
