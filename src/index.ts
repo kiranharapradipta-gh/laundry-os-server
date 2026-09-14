@@ -12,7 +12,7 @@ import customerRoutes from "./modules/customers/customer.routes.js";
 import customerTagRoutes from "./modules/customer-tags/customer-tag.routes.js";
 import customerSegmentRoutes from "./modules/customer-segments/customer-segment.routes.js";
 
-const app = express();
+export const app = express();
 
 app.use(cors());
 app.use(express.json());
@@ -52,8 +52,10 @@ app.use(errorMiddleware);
 
 const port = 3000;
 
-app.listen(port, () => {
-  console.log(
-    `API running on http://localhost:${port}`,
-  );
-});
+if (process.env.NODE_ENV !== "test") {
+  app.listen(port, () => {
+    console.log(
+      `API running on http://localhost:${port}`,
+    );
+  });
+}
