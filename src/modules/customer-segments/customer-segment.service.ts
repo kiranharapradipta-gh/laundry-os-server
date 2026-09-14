@@ -12,6 +12,8 @@ import type {
   CustomerSegmentListInput,
   UpdateCustomerSegmentInput,
 } from "./customer-segment.validation.js";
+import { AppError } from "../../errors/app-error.js";
+import { evaluateSegmentRules, isValidSegmentRules, type SegmentRules } from "./customer-segment.rules.js";
 
 export const listCustomerSegments = async (
   businessId: string,
@@ -561,4 +563,307 @@ export const removeCustomerFromSegment =
         },
       },
     });
+  };
+
+export const refreshCustomerSegment = async (
+  businessId: string,
+  segmentId: string,
+) => {
+  const segment = await prisma.customerSegment.findFirst({
+    where: {
+      id: segmentId,
+      businessId,
+      active: true,
+    },
+  });
+
+  if (!segment) {
+    throw new AppError(
+      "Segment tidak ditemukan atau tidak aktif",
+      404,
+    );
+  }
+
+  if (!segment.isDynamic) {
+    throw new AppError(
+      "Hanya dynamic segment yang dapat di-refresh",
+      400,
+    );
+  }
+
+  if (!isValidSegmentRules(segment.rules)) {
+    throw new AppError(
+      "Rules segment tidak valid",
+      400,
+    );
+  }
+
+  const rules =
+    segment.rules as SegmentRules;
+
+  const customers =
+    await prisma.customer.findMany({
+      where: {
+        businessId,
+        deletedAt: null,
+        status: "ACTIVE",
+      },
+      select: {
+        id: true,
+        totalOrders: true,
+        totalSpent: true,
+        averageOrderValue: true,
+        status: true,
+        firstOrderAt: true,
+        lastOrderAt: true,
+      },
+    });
+
+  const matchingCustomerIds = new Set(
+    customers
+      .filter((customer) =>
+        evaluateSegmentRules(
+          customer,
+          rules,
+        ),
+      )
+      .map((customer) => customer.id),
+  );
+
+  const existingMembers =
+    await prisma.customerSegmentMember.findMany({
+      where: {
+        segmentId,
+      },
+      select: {
+        customerId: true,
+      },
+    });
+
+  const existingCustomerIds = new Set(
+    existingMembers.map(
+      (member) => member.customerId,
+    ),
+  );
+
+  const customerIdsToAdd =
+    customers
+      .filter(
+        (customer) =>
+          matchingCustomerIds.has(customer.id) &&
+          !existingCustomerIds.has(customer.id),
+      )
+      .map((customer) => customer.id);
+
+  const customerIdsToRemove =
+    existingMembers
+      .filter(
+        (member) =>
+          !matchingCustomerIds.has(
+            member.customerId,
+          ),
+      )
+      .map((member) => member.customerId);
+
+  await prisma.$transaction(async (tx) => {
+    if (customerIdsToAdd.length > 0) {
+      await tx.customerSegmentMember.createMany({
+        data: customerIdsToAdd.map(
+          (customerId) => ({
+            segmentId,
+            customerId,
+          }),
+        ),
+        skipDuplicates: true,
+      });
+    }
+
+    if (customerIdsToRemove.length > 0) {
+      await tx.customerSegmentMember.deleteMany({
+        where: {
+          segmentId,
+          customerId: {
+            in: customerIdsToRemove,
+          },
+        },
+      });
+    }
+  });
+
+  return {
+    segmentId,
+    matched: matchingCustomerIds.size,
+    added: customerIdsToAdd.length,
+    removed: customerIdsToRemove.length,
+    unchanged:
+      matchingCustomerIds.size -
+      customerIdsToAdd.length,
+  };
+};
+
+export const previewCustomerSegment = async (
+  businessId: string,
+  segmentId: string,
+) => {
+  const segment =
+    await prisma.customerSegment.findFirst({
+      where: {
+        id: segmentId,
+        businessId,
+        active: true,
+      },
+    });
+
+  if (!segment) {
+    throw new AppError(
+      "Segment tidak ditemukan atau tidak aktif",
+      404,
+    );
+  }
+
+  if (!segment.isDynamic) {
+    throw new AppError(
+      "Hanya dynamic segment yang dapat di-preview",
+      400,
+    );
+  }
+
+  if (!isValidSegmentRules(segment.rules)) {
+    throw new AppError(
+      "Rules segment tidak valid",
+      400,
+    );
+  }
+
+  const rules =
+    segment.rules as SegmentRules;
+
+  const customers =
+    await prisma.customer.findMany({
+      where: {
+        businessId,
+        deletedAt: null,
+        status: "ACTIVE",
+      },
+      select: {
+        id: true,
+        customerCode: true,
+        name: true,
+        phone: true,
+        totalOrders: true,
+        totalSpent: true,
+        averageOrderValue: true,
+        status: true,
+        firstOrderAt: true,
+        lastOrderAt: true,
+      },
+      orderBy: {
+        lastOrderAt: "desc",
+      },
+    });
+
+  const matchedCustomers =
+    customers.filter((customer) =>
+      evaluateSegmentRules(
+        customer,
+        rules,
+      ),
+    );
+
+  return {
+    segmentId: segment.id,
+    segmentName: segment.name,
+    totalCustomers: customers.length,
+    matchedCustomers: matchedCustomers.length,
+    customers: matchedCustomers,
+  };
+};
+
+export const syncDynamicSegmentsForCustomer =
+  async (
+    businessId: string,
+    customerId: string,
+  ) => {
+    const customer =
+      await prisma.customer.findFirst({
+        where: {
+          id: customerId,
+          businessId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          totalOrders: true,
+          totalSpent: true,
+          averageOrderValue: true,
+          status: true,
+          firstOrderAt: true,
+          lastOrderAt: true,
+        },
+      });
+
+    if (!customer) {
+      return;
+    }
+
+    const segments =
+      await prisma.customerSegment.findMany({
+        where: {
+          businessId,
+          active: true,
+          isDynamic: true,
+        },
+        select: {
+          id: true,
+          rules: true,
+        },
+      });
+
+    for (const segment of segments) {
+      if (
+        !isValidSegmentRules(
+          segment.rules,
+        )
+      ) {
+        continue;
+      }
+
+      const matches =
+        evaluateSegmentRules(
+          customer,
+          segment.rules as SegmentRules,
+        );
+
+      const existing =
+        await prisma.customerSegmentMember.findUnique({
+          where: {
+            segmentId_customerId: {
+              segmentId: segment.id,
+              customerId,
+            },
+          },
+        });
+
+      if (matches && !existing) {
+        await prisma.customerSegmentMember.create({
+          data: {
+            segmentId: segment.id,
+            customerId,
+          },
+        });
+
+        continue;
+      }
+
+      if (!matches && existing) {
+        await prisma.customerSegmentMember.delete({
+          where: {
+            segmentId_customerId: {
+              segmentId: segment.id,
+              customerId,
+            },
+          },
+        });
+      }
+    }
   };

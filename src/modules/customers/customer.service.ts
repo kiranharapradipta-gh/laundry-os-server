@@ -8,6 +8,7 @@ import type {
   CustomerListInput,
   UpdateCustomerInput,
 } from "./customer.types.js";
+import { syncDynamicSegmentsForCustomer } from "../customer-segments/customer-segment.service.js";
 
 const generateCustomerCode = (): string => {
   return `CUS-${randomUUID()
@@ -252,7 +253,7 @@ export const updateCustomer = async (
     }
   }
 
-  return prisma.customer.update({
+  const customer = prisma.customer.update({
     where: {
       id: customerId,
     },
@@ -289,6 +290,13 @@ export const updateCustomer = async (
         : {}),
     },
   });
+
+  await syncDynamicSegmentsForCustomer(
+    businessId,
+    customerId,
+  );
+
+  return customer
 };
 
 export const deleteCustomer = async (

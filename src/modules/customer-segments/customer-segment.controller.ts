@@ -10,6 +10,8 @@ import {
   getCustomerSegmentById,
   listCustomerSegments,
   listSegmentCustomers,
+  previewCustomerSegment,
+  refreshCustomerSegment,
   removeCustomerFromSegment,
   updateCustomerSegment,
 } from "./customer-segment.service.js";
@@ -230,5 +232,57 @@ export const removeCustomerFromSegmentController =
       null,
       200,
       "Customer berhasil dikeluarkan dari segment",
+    );
+  };
+
+export const refreshCustomerSegmentController =
+  async (
+    req: Request,
+    res: Response,
+  ) => {
+    const { segmentId } =
+      res.locals.validatedParams as {
+        segmentId: string;
+      };
+
+    const user = req.user!;
+
+    const result =
+      await refreshCustomerSegment(
+        user.businessId,
+        segmentId,
+      );
+
+    return successResponse(
+      res,
+      result,
+      200,
+      "Segment berhasil di-refresh",
+    );
+  };
+
+export const previewCustomerSegmentController =
+  async (
+    req: Request,
+    res: Response,
+  ) => {
+    const { segmentId } =
+      res.locals.validatedParams as {
+        segmentId: string;
+      };
+
+    const user = req.user!;
+
+    const result =
+      await previewCustomerSegment(
+        user.businessId,
+        segmentId,
+      );
+
+    return successResponse(
+      res,
+      result,
+      200,
+      "Preview segment berhasil",
     );
   };

@@ -7,6 +7,8 @@ import {
   getCustomerSegmentController,
   listCustomerSegmentsController,
   listSegmentCustomersController,
+  previewCustomerSegmentController,
+  refreshCustomerSegmentController,
   removeCustomerFromSegmentController,
   updateCustomerSegmentController,
 } from "./customer-segment.controller.js";
@@ -32,7 +34,7 @@ router.use(authMiddleware);
 
 /*
 |--------------------------------------------------------------------------
-| Customer Segment CRUD
+| Customer Segment Collection
 |--------------------------------------------------------------------------
 */
 
@@ -48,18 +50,6 @@ router.get(
   ),
 );
 
-router.get(
-  "/:id",
-  requirePermission("customer.read"),
-  validate(
-    customerSegmentIdSchema,
-    "params",
-  ),
-  asyncHandler(
-    getCustomerSegmentController,
-  ),
-);
-
 router.post(
   "/",
   requirePermission("customer.create"),
@@ -72,39 +62,41 @@ router.post(
   ),
 );
 
-router.patch(
-  "/:id",
+/*
+|--------------------------------------------------------------------------
+| Customer Segment Actions
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  "/:segmentId/refresh",
   requirePermission("customer.update"),
   validate(
-    customerSegmentIdSchema,
-    "params",
-  ),
-  validate(
-    updateCustomerSegmentSchema,
-    "body",
-  ),
-  asyncHandler(
-    updateCustomerSegmentController,
-  ),
-);
-
-router.delete(
-  "/:id",
-  requirePermission("customer.delete"),
-  validate(
-    customerSegmentIdSchema,
+    customerSegmentOnlyIdSchema,
     "params",
   ),
   asyncHandler(
-    deleteCustomerSegmentController,
+    refreshCustomerSegmentController,
   ),
 );
 
 /*
 |--------------------------------------------------------------------------
-| Segment Members
+| Customer Segment Members
 |--------------------------------------------------------------------------
 */
+
+router.post(
+  "/:segmentId/preview",
+  requirePermission("customer.read"),
+  validate(
+    customerSegmentOnlyIdSchema,
+    "params",
+  ),
+  asyncHandler(
+    previewCustomerSegmentController,
+  ),
+);
 
 router.get(
   "/:segmentId/customers",
@@ -139,6 +131,52 @@ router.delete(
   ),
   asyncHandler(
     removeCustomerFromSegmentController,
+  ),
+);
+
+/*
+|--------------------------------------------------------------------------
+| Customer Segment Resource
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/:id",
+  requirePermission("customer.read"),
+  validate(
+    customerSegmentIdSchema,
+    "params",
+  ),
+  asyncHandler(
+    getCustomerSegmentController,
+  ),
+);
+
+router.patch(
+  "/:id",
+  requirePermission("customer.update"),
+  validate(
+    customerSegmentIdSchema,
+    "params",
+  ),
+  validate(
+    updateCustomerSegmentSchema,
+    "body",
+  ),
+  asyncHandler(
+    updateCustomerSegmentController,
+  ),
+);
+
+router.delete(
+  "/:id",
+  requirePermission("customer.delete"),
+  validate(
+    customerSegmentIdSchema,
+    "params",
+  ),
+  asyncHandler(
+    deleteCustomerSegmentController,
   ),
 );
 

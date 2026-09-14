@@ -3,6 +3,46 @@ import { z } from "zod";
 const optionalString = (max: number) =>
   z.string().trim().max(max).optional();
 
+const segmentRuleSchema = z.object({
+  field: z.enum([
+    "totalOrders",
+    "totalSpent",
+    "averageOrderValue",
+    "status",
+    "firstOrderAt",
+    "lastOrderAt",
+  ]),
+
+  operator: z.enum([
+    "eq",
+    "neq",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "within_days",
+    "older_than_days",
+  ]),
+
+  value: z.union([
+    z.string(),
+    z.number(),
+    z.null(),
+  ]),
+});
+
+const segmentRulesSchema = z.object({
+  all: z
+    .array(segmentRuleSchema)
+    .max(20)
+    .optional(),
+
+  any: z
+    .array(segmentRuleSchema)
+    .max(20)
+    .optional(),
+});
+
 export const createCustomerSegmentSchema =
   z.object({
     name: z
@@ -24,7 +64,7 @@ export const createCustomerSegmentSchema =
 
     isDynamic: z.boolean().default(false),
 
-    rules: z.record(z.string(), z.unknown()).optional(),
+    rules: segmentRulesSchema.optional(),
 
     active: z.boolean().default(true),
   });

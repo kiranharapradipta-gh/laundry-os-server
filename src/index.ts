@@ -36,7 +36,7 @@ app.use(
 );
 
 app.use(
-  "/customer-segments",
+  "/api/customer-segments",
   customerSegmentRoutes,
 );
 
