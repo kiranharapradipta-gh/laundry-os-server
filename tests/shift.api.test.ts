@@ -32,7 +32,7 @@ vi.mock(
   () => shiftServiceMock,
 );
 
-import { app } from "../src/index.js";
+import { app } from "../src/app.js";
 import { signAccessToken } from "../src/utils/jwt.js";
 
 const businessId =
