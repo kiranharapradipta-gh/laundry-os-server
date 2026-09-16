@@ -90,6 +90,66 @@ const ensureBranch = async (
   return branch;
 };
 
+/**
+ * Lock inventory row untuk mencegah
+ * concurrent stock mutation / lost update.
+ */
+const getLockedInventoryItem = async (
+  tx: Prisma.TransactionClient,
+  businessId: string,
+  itemId: string,
+) => {
+  const rows = await tx.$queryRaw<
+    Array<{
+      id: string;
+      businessId: string;
+      branchId: string | null;
+      sku: string;
+      name: string;
+      description: string | null;
+      unit: string;
+      currentStock: Prisma.Decimal;
+      minimumStock: Prisma.Decimal;
+      maximumStock: Prisma.Decimal | null;
+      costPrice: Prisma.Decimal;
+      active: boolean;
+      createdAt: Date;
+      updatedAt: Date;
+    }>
+  >`
+    SELECT
+      "id",
+      "businessId",
+      "branchId",
+      "sku",
+      "name",
+      "description",
+      "unit",
+      "currentStock",
+      "minimumStock",
+      "maximumStock",
+      "costPrice",
+      "active",
+      "createdAt",
+      "updatedAt"
+    FROM "InventoryItem"
+    WHERE
+      "id" = ${itemId}
+      AND "businessId" = ${businessId}
+    FOR UPDATE
+  `;
+
+  const item = rows[0];
+
+  if (!item) {
+    throw notFound(
+      "Inventory item tidak ditemukan",
+    );
+  }
+
+  return item;
+};
+
 export const listInventoryItems = async (
   businessId: string,
   query: InventoryListQuery,
@@ -103,75 +163,243 @@ export const listInventoryItems = async (
     lowStock,
   } = query;
 
-  const where: Prisma.InventoryItemWhereInput = {
-    businessId,
-    ...(branchId
-      ? { branchId }
-      : {}),
-    ...(active !== undefined
-      ? { active }
-      : {}),
-    ...(search
-      ? {
-          OR: [
-            {
-              sku: {
-                contains: search,
-                mode: "insensitive",
+  /*
+   * Normal listing:
+   * tetap gunakan Prisma karena tidak membutuhkan
+   * column-to-column comparison.
+   */
+  if (lowStock !== true) {
+    const where: Prisma.InventoryItemWhereInput = {
+      businessId,
+
+      ...(branchId
+        ? { branchId }
+        : {}),
+
+      ...(active !== undefined
+        ? { active }
+        : {}),
+
+      ...(search
+        ? {
+            OR: [
+              {
+                sku: {
+                  contains: search,
+                  mode: "insensitive",
+                },
               },
+              {
+                name: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] =
+      await prisma.$transaction([
+        prisma.inventoryItem.findMany({
+          where,
+
+          orderBy: [
+            {
+              name: "asc",
             },
             {
-              name: {
-                contains: search,
-                mode: "insensitive",
-              },
+              id: "asc",
             },
           ],
-        }
-      : {}),
-  };
 
-  const [items, total] =
-    await prisma.$transaction([
-      prisma.inventoryItem.findMany({
-        where,
-        orderBy: {
+          skip: (page - 1) * limit,
+          take: limit,
+
+          select: inventoryItemSelect,
+        }),
+
+        prisma.inventoryItem.count({
+          where,
+        }),
+      ]);
+
+    return {
+      items,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(
+          total / limit,
+        ),
+      },
+    };
+  }
+
+  /*
+   * LOW STOCK
+   *
+   * Prisma tidak menyediakan scalar-to-scalar
+   * comparison seperti:
+   *
+   * currentStock <= minimumStock
+   *
+   * secara langsung.
+   *
+   * Jadi gunakan PostgreSQL untuk filtering +
+   * pagination di database.
+   */
+
+  const searchPattern = search
+    ? `%${search}%`
+    : null;
+
+  const offset =
+    (page - 1) * limit;
+
+  const branchCondition =
+    branchId
+      ? Prisma.sql`
+          AND "branchId" = ${branchId}
+        `
+      : Prisma.empty;
+
+  const activeCondition =
+    active !== undefined
+      ? Prisma.sql`
+          AND "active" = ${active}
+        `
+      : Prisma.empty;
+
+  const searchCondition =
+    searchPattern
+      ? Prisma.sql`
+          AND (
+            "sku" ILIKE ${searchPattern}
+            OR
+            "name" ILIKE ${searchPattern}
+          )
+        `
+      : Prisma.empty;
+
+  const baseCondition =
+    Prisma.sql`
+      WHERE
+        "businessId" = ${businessId}
+
+        AND
+        "currentStock" <= "minimumStock"
+
+        ${branchCondition}
+
+        ${activeCondition}
+
+        ${searchCondition}
+    `;
+
+  const [
+    rows,
+    countRows,
+  ] = await prisma.$transaction([
+    prisma.$queryRaw<
+      Array<{
+        id: string;
+      }>
+    >(
+      Prisma.sql`
+        SELECT
+          "id"
+        FROM "InventoryItem"
+
+        ${baseCondition}
+
+        ORDER BY
+          "name" ASC,
+          "id" ASC
+
+        LIMIT ${limit}
+        OFFSET ${offset}
+      `,
+    ),
+
+    prisma.$queryRaw<
+      Array<{
+        total: bigint;
+      }>
+    >(
+      Prisma.sql`
+        SELECT
+          COUNT(*)::bigint AS "total"
+
+        FROM "InventoryItem"
+
+        ${baseCondition}
+      `,
+    ),
+  ]);
+
+  const total =
+    Number(countRows[0]?.total ?? 0);
+
+  const ids = rows.map(
+    (row) => row.id,
+  );
+
+  /*
+   * Tidak ada hasil.
+   */
+  if (ids.length === 0) {
+    return {
+      items: [],
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(
+          total / limit,
+        ),
+      },
+    };
+  }
+
+  const items =
+    await prisma.inventoryItem.findMany({
+      where: {
+        id: {
+          in: ids,
+        },
+      },
+
+      /*
+       * Gunakan order yang sama dengan
+       * query pagination PostgreSQL.
+       */
+      orderBy: [
+        {
           name: "asc",
         },
-        skip: (page - 1) * limit,
-        take: limit,
-        select: inventoryItemSelect,
-      }),
-      prisma.inventoryItem.count({
-        where,
-      }),
-    ]);
+        {
+          id: "asc",
+        },
+      ],
 
-  const filteredItems =
-    lowStock === true
-      ? items.filter((item) =>
-          isLowStock(
-            item.currentStock,
-            item.minimumStock,
-          ),
-        )
-      : items;
+      select: inventoryItemSelect,
+    });
 
   return {
-    items: filteredItems,
+    items,
+
     pagination: {
       page,
       limit,
-      total:
-        lowStock === true
-          ? filteredItems.length
-          : total,
-      totalPages:
-        lowStock === true
-          ? Math.ceil(
-              filteredItems.length / limit,
-            )
-          : Math.ceil(total / limit),
+      total,
+      totalPages: Math.ceil(
+        total / limit,
+      ),
     },
   };
 };
@@ -207,6 +435,7 @@ export const createInventoryItem =
             sku: input.sku,
           },
         },
+
         select: {
           id: true,
         },
@@ -223,15 +452,19 @@ export const createInventoryItem =
         businessId,
         sku: input.sku,
         name: input.name,
+
         description:
           input.description ?? null,
+
         unit: input.unit,
+
         minimumStock:
           input.minimumStock !== undefined
             ? toDecimal(
                 input.minimumStock,
               )
             : new Prisma.Decimal(0),
+
         maximumStock:
           input.maximumStock !== undefined
             ? input.maximumStock === null
@@ -240,15 +473,19 @@ export const createInventoryItem =
                   input.maximumStock,
                 )
             : null,
+
         costPrice:
           input.costPrice !== undefined
             ? toDecimal(input.costPrice)
             : new Prisma.Decimal(0),
+
         branchId:
           input.branchId ?? null,
+
         active:
           input.active ?? true,
       },
+
       select: inventoryItemSelect,
     });
   };
@@ -277,10 +514,12 @@ export const updateInventoryItem =
           where: {
             businessId,
             sku: input.sku,
+
             NOT: {
               id: itemId,
             },
           },
+
           select: {
             id: true,
           },
@@ -297,22 +536,27 @@ export const updateInventoryItem =
       where: {
         id: itemId,
       },
+
       data: {
         ...(input.sku !== undefined
           ? { sku: input.sku }
           : {}),
+
         ...(input.name !== undefined
           ? { name: input.name }
           : {}),
+
         ...(input.description !== undefined
           ? {
               description:
                 input.description,
             }
           : {}),
+
         ...(input.unit !== undefined
           ? { unit: input.unit }
           : {}),
+
         ...(input.minimumStock !== undefined
           ? {
               minimumStock:
@@ -321,6 +565,7 @@ export const updateInventoryItem =
                 ),
             }
           : {}),
+
         ...(input.maximumStock !== undefined
           ? {
               maximumStock:
@@ -331,6 +576,7 @@ export const updateInventoryItem =
                     ),
             }
           : {}),
+
         ...(input.costPrice !== undefined
           ? {
               costPrice: toDecimal(
@@ -338,18 +584,21 @@ export const updateInventoryItem =
               ),
             }
           : {}),
+
         ...(input.branchId !== undefined
           ? {
               branchId:
                 input.branchId,
             }
           : {}),
+
         ...(input.active !== undefined
           ? {
               active: input.active,
             }
           : {}),
       },
+
       select: inventoryItemSelect,
     });
   };
@@ -368,13 +617,21 @@ export const deleteInventoryItem =
       where: {
         id: itemId,
       },
+
       data: {
         active: false,
       },
+
       select: inventoryItemSelect,
     });
   };
 
+/**
+ * Semua stock mutation masuk lewat function ini.
+ *
+ * Row InventoryItem dikunci dengan FOR UPDATE
+ * sebelum membaca currentStock.
+ */
 const createStockTransaction =
   async (
     businessId: string,
@@ -390,18 +647,11 @@ const createStockTransaction =
     return prisma.$transaction(
       async (tx) => {
         const item =
-          await tx.inventoryItem.findFirst({
-            where: {
-              id: itemId,
-              businessId,
-            },
-          });
-
-        if (!item) {
-          throw notFound(
-            "Inventory item tidak ditemukan",
+          await getLockedInventoryItem(
+            tx,
+            businessId,
+            itemId,
           );
-        }
 
         const beforeStock =
           new Prisma.Decimal(
@@ -423,6 +673,7 @@ const createStockTransaction =
           where: {
             id: itemId,
           },
+
           data: {
             currentStock: afterStock,
           },
@@ -432,24 +683,32 @@ const createStockTransaction =
           {
             data: {
               inventoryItemId: itemId,
+
               type: input.type,
+
               quantity,
+
               beforeStock,
+
               afterStock,
+
               unitCost:
                 input.unitCost !==
-                undefined &&
+                  undefined &&
                 input.unitCost !== null
                   ? toDecimal(
                       input.unitCost,
                     )
                   : null,
+
               referenceType:
                 input.referenceType ??
                 null,
+
               referenceId:
                 input.referenceId ??
                 null,
+
               notes:
                 input.notes ?? null,
             },
@@ -472,6 +731,7 @@ export const stockIn = async (
     itemId,
     {
       ...input,
+
       type:
         InventoryTransactionType.PURCHASE,
     },
@@ -491,6 +751,7 @@ export const stockOut = async (
     itemId,
     {
       ...input,
+
       type:
         InventoryTransactionType.USAGE,
     },
@@ -506,23 +767,27 @@ export const adjustStock = async (
     input.actualStock,
   );
 
-  ensureNonNegativeStock(actualStock);
+  ensureNonNegativeStock(
+    actualStock,
+  );
 
   return prisma.$transaction(
     async (tx) => {
+      /*
+       * IMPORTANT:
+       *
+       * Lock row sebelum membaca currentStock.
+       *
+       * Jadi adjustment tidak akan membaca
+       * stock lama ketika ada stock mutation
+       * lain yang sedang berjalan.
+       */
       const item =
-        await tx.inventoryItem.findFirst({
-          where: {
-            id: itemId,
-            businessId,
-          },
-        });
-
-      if (!item) {
-        throw notFound(
-          "Inventory item tidak ditemukan",
+        await getLockedInventoryItem(
+          tx,
+          businessId,
+          itemId,
         );
-      }
 
       const beforeStock =
         new Prisma.Decimal(
@@ -537,15 +802,23 @@ export const adjustStock = async (
         actualStock,
       );
 
-      // Tidak ada perubahan stok.
+      /*
+       * Tidak ada perubahan stock.
+       */
       if (type === null) {
         return {
           changed: false,
+
           delta: new Prisma.Decimal(0),
+
           type: null,
+
           beforeStock,
+
           afterStock: beforeStock,
+
           adjustment: null,
+
           transaction: null,
         };
       }
@@ -554,6 +827,7 @@ export const adjustStock = async (
         where: {
           id: itemId,
         },
+
         data: {
           currentStock: actualStock,
         },
@@ -563,9 +837,13 @@ export const adjustStock = async (
         await tx.stockAdjustment.create({
           data: {
             inventoryItemId: itemId,
+
             quantity: delta,
+
             reason: input.reason,
-            notes: input.notes ?? null,
+
+            notes:
+              input.notes ?? null,
           },
         });
 
@@ -573,21 +851,33 @@ export const adjustStock = async (
         await tx.inventoryTransaction.create({
           data: {
             inventoryItemId: itemId,
+
             type,
+
             quantity: delta,
+
             beforeStock,
+
             afterStock: actualStock,
-            notes: input.notes ?? null,
+
+            notes:
+              input.notes ?? null,
           },
         });
 
       return {
         changed: true,
+
         delta,
+
         type,
+
         beforeStock,
+
         afterStock: actualStock,
+
         adjustment,
+
         transaction,
       };
     },
@@ -610,8 +900,10 @@ export const listInventoryTransactions =
           inventoryItem: {
             businessId,
           },
+
           inventoryItemId: itemId,
         },
+
         orderBy: {
           createdAt: "desc",
         },
