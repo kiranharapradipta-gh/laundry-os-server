@@ -11,6 +11,10 @@ export const httpLoggerMiddleware = (
   res: Response,
   next: NextFunction,
 ) => {
+  if (process.env.NODE_ENV === "test") {
+    return next();
+  }
+
   const startedAt = Date.now();
 
   res.on("finish", () => {

@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -517,8 +518,8 @@ model UserSession {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([businessId])
@@ -994,8 +995,7 @@ model Shift {
 
   status ShiftStatus @default(OPEN)
 
-  notes String?
-
+  notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1004,6 +1004,8 @@ model Shift {
 
   cashSessions CashSession[]
 
+  // Hanya boleh ada 1 OPEN shift per employee.
+  @@unique([employeeId], where: { status: "OPEN" }, map: "shift_employee_open_unique")
   @@index([branchId])
   @@index([employeeId])
   @@index([status])
@@ -1043,8 +1045,7 @@ model CashSession {
   actualBalance   Decimal? @db.Decimal(14, 2)
 
   status ShiftStatus @default(OPEN)
-
-  notes String?
+  notes  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1055,6 +1056,7 @@ model CashSession {
 
   movements CashMovement[]
 
+  @@unique([cashRegisterId], where: { status: "OPEN" }, map: "cash_session_register_open_unique")
   @@index([cashRegisterId])
   @@index([shiftId])
 }
@@ -1143,8 +1145,8 @@ model Customer {
 
   vouchers CustomerVoucher[]
 
-  @@index([businessId, deletedAt])
   @@unique([businessId, customerCode])
+  @@index([businessId, deletedAt])
   @@index([businessId])
   @@index([businessId, phone])
   @@index([businessId, whatsapp])

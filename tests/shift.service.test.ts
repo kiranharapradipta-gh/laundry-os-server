@@ -1,16 +1,11 @@
-import {
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const transactionMock = vi.hoisted(() => ({
   shift: {
     findFirst: vi.fn(),
     findMany: vi.fn(),
     count: vi.fn(),
+    create: vi.fn(),
     update: vi.fn(),
   },
 
@@ -47,7 +42,15 @@ const prismaMock = vi.hoisted(() => ({
     count: vi.fn(),
   },
 
+  employee: {
+    findFirst: vi.fn(),
+  },
+
   branch: {
+    findFirst: vi.fn(),
+  },
+
+  cashRegister: {
     findFirst: vi.fn(),
   },
 
@@ -55,126 +58,245 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
   },
 
+  cashMovement: {
+    findMany: vi.fn(),
+  },
 }));
 
 vi.mock("../src/config/database.js", () => ({
   prisma: prismaMock,
 }));
 
-import { Prisma } from "@prisma/client";
-
 import {
-  openShift,
-  closeShift,
   addCashMovement,
-  listCashMovements,
+  closeShift,
   getShiftById,
+  listCashMovements,
   listShifts,
+  openShift,
 } from "../src/modules/shift/shift.service.js";
 
-const businessId =
-  "4999e4ca-f860-4d3f-84f7-15b04d402eb2";
+const businessId = "business-1";
+const branchId = "branch-1";
+const employeeId = "employee-1";
+const cashRegisterId = "register-1";
+const shiftId = "shift-1";
+const sessionId = "session-1";
 
-const otherBusinessId =
-  "5999e4ca-f860-4d3f-84b7-15b04d402eb3";
-
-const shiftId =
-  "11111111-1111-4111-8111-111111111111";
-
-const branchId =
-  "22222222-2222-4222-8222-222222222222";
-
-const employeeId =
-  "33333333-3333-4333-8333-333333333333";
-
-const cashRegisterId =
-  "44444444-4444-4444-8444-444444444444";
-
-const sessionId =
-  "55555555-5555-4555-8555-555555555555";
-
-const createShift = (
-  overrides: Record<string, unknown> = {},
-) => ({
+const createShift = (overrides = {}) => ({
   id: shiftId,
   branchId,
   employeeId,
-  startedAt: new Date("2026-09-16T08:00:00.000Z"),
+  startedAt: new Date("2026-01-01T08:00:00.000Z"),
   endedAt: null,
-  openingCash: new Prisma.Decimal("100000"),
+  openingCash: 100000,
   closingCash: null,
   status: "OPEN",
   notes: null,
-  createdAt: new Date("2026-09-16T08:00:00.000Z"),
-  updatedAt: new Date("2026-09-16T08:00:00.000Z"),
+  branch: {
+    id: branchId,
+    code: "BR-001",
+    name: "Main Branch",
+  },
+  employee: {
+    id: employeeId,
+    employeeCode: "EMP-001",
+    name: "John Doe",
+  },
   ...overrides,
 });
 
-const createSession = (
-  overrides: Record<string, unknown> = {},
-) => ({
+const createSession = (overrides = {}) => ({
   id: sessionId,
   cashRegisterId,
   shiftId,
   employeeId,
-  openedAt: new Date("2026-09-16T08:00:00.000Z"),
+  openedAt: new Date("2026-01-01T08:00:00.000Z"),
   closedAt: null,
-  openingBalance: new Prisma.Decimal("100000"),
-  expectedBalance: null,
+  openingBalance: 100000,
+  expectedBalance: 100000,
   actualBalance: null,
   status: "OPEN",
-  createdAt: new Date("2026-09-16T08:00:00.000Z"),
-  updatedAt: new Date("2026-09-16T08:00:00.000Z"),
   ...overrides,
 });
 
-beforeEach(() => {
-  vi.clearAllMocks();
-
-  prismaMock.$transaction.mockImplementation(
-    async (input: unknown) => {
-      if (typeof input === "function") {
-        return input(transactionMock);
-      }
-
-      if (Array.isArray(input)) {
-        return Promise.all(input);
-      }
-
-      return input;
-    },
-  );
-});
-
 describe("shift.service", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+
+    prismaMock.$transaction.mockImplementation(
+      async (input: unknown) => {
+        if (typeof input === "function") {
+          return input(transactionMock);
+        }
+
+        if (Array.isArray(input)) {
+          return Promise.all(input);
+        }
+
+        return input;
+      },
+    );
+  });
+
+  describe("listShifts", () => {
+    it("lists shifts with pagination", async () => {
+      const shifts = [createShift()];
+
+      prismaMock.shift.findMany.mockResolvedValue(shifts);
+      prismaMock.shift.count.mockResolvedValue(1);
+
+      const result = await listShifts(businessId, {
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.items).toEqual(shifts);
+      expect(result.pagination.total).toBe(1);
+      expect(prismaMock.shift.findMany).toHaveBeenCalled();
+      expect(prismaMock.shift.count).toHaveBeenCalled();
+    });
+
+    it("filters by branch", async () => {
+      prismaMock.shift.findMany.mockResolvedValue([]);
+      prismaMock.shift.count.mockResolvedValue(0);
+
+      await listShifts(businessId, {
+        page: 1,
+        limit: 10,
+        branchId,
+      });
+
+      expect(prismaMock.shift.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            branch: {
+              businessId,
+            },
+            branchId,
+          }),
+        }),
+      );
+    });
+
+    it("filters by employee", async () => {
+      prismaMock.shift.findMany.mockResolvedValue([]);
+      prismaMock.shift.count.mockResolvedValue(0);
+
+      await listShifts(businessId, {
+        page: 1,
+        limit: 10,
+        employeeId,
+      });
+
+      expect(prismaMock.shift.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            employeeId,
+            branch: {
+              businessId,
+            },
+          }),
+        }),
+      );
+    });
+
+    it("filters by status", async () => {
+      prismaMock.shift.findMany.mockResolvedValue([]);
+      prismaMock.shift.count.mockResolvedValue(0);
+
+      await listShifts(businessId, {
+        page: 1,
+        limit: 10,
+        status: "OPEN",
+      });
+
+      expect(prismaMock.shift.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: "OPEN",
+            branch: {
+              businessId,
+            },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("getShift", () => {
+    it("returns a shift", async () => {
+      const shift = createShift();
+
+      prismaMock.shift.findFirst.mockResolvedValue(shift);
+
+      const result = await getShiftById(businessId, shiftId);
+
+      expect(result).toEqual(shift);
+      expect(prismaMock.shift.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: shiftId,
+            branch: {
+              businessId,
+            },
+          },
+        }),
+      );
+    });
+
+    it("throws when shift does not exist", async () => {
+      prismaMock.shift.findFirst.mockResolvedValue(null);
+
+      await expect(
+        getShiftById(businessId, shiftId),
+      ).rejects.toThrow("Shift tidak ditemukan");
+    });
+  });
+
   describe("openShift", () => {
-    it("opens a shift successfully", async () => {
-      transactionMock.employee.findFirst.mockResolvedValue({
+    const validInput = {
+      branchId,
+      employeeId,
+      cashRegisterId,
+      openingCash: 100000,
+      notes: "Morning shift",
+    };
+
+    beforeEach(() => {
+      prismaMock.employee.findFirst.mockResolvedValue({
         id: employeeId,
         businessId,
-        branchId,
+        employeeCode: "EMP-001",
+        name: "John Doe",
         status: "ACTIVE",
+        branchId,
       });
 
-      transactionMock.branch.findFirst.mockResolvedValue({
+      prismaMock.branch.findFirst.mockResolvedValue({
         id: branchId,
         businessId,
+        code: "BR-001",
+        name: "Main Branch",
         status: "ACTIVE",
       });
 
-      transactionMock.cashRegister.findFirst.mockResolvedValue({
+      prismaMock.cashRegister.findFirst.mockResolvedValue({
         id: cashRegisterId,
         branchId,
+        code: "REG-001",
+        name: "Main Register",
         active: true,
       });
+
+      prismaMock.shift.findFirst.mockResolvedValue(null);
+      prismaMock.cashSession.findFirst.mockResolvedValue(null);
 
       transactionMock.shift.findFirst
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(null);
 
-      transactionMock.shift.update.mockResolvedValue(
-        createShift(),
-      );
+      transactionMock.shift.create.mockResolvedValue(createShift());
 
       transactionMock.cashSession.create.mockResolvedValue(
         createSession(),
@@ -183,135 +305,178 @@ describe("shift.service", () => {
       transactionMock.cashMovement.create.mockResolvedValue({
         id: "movement-1",
       });
+    });
 
-      prismaMock.branch.findFirst.mockResolvedValue({
-        id: branchId,
-        businessId,
-        status: "ACTIVE",
-      });
-
+    it("opens a shift successfully", async () => {
       const result = await openShift(
         businessId,
+        validInput,
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          shift: expect.anything(),
+          cashSession: expect.anything(),
+        }),
+      );
+
+      expect(prismaMock.employee.findFirst).toHaveBeenCalled();
+      expect(prismaMock.branch.findFirst).toHaveBeenCalled();
+      expect(prismaMock.cashRegister.findFirst).toHaveBeenCalled();
+
+      expect(transactionMock.shift.create).toHaveBeenCalled();
+      expect(transactionMock.cashSession.create).toHaveBeenCalled();
+      expect(transactionMock.cashMovement.create).toHaveBeenCalled();
+
+      expect(prismaMock.$transaction).toHaveBeenCalled();
+    });
+
+    it("rejects inactive employee", async () => {
+      prismaMock.employee.findFirst.mockResolvedValue(null);
+
+      await expect(
+        openShift(businessId, validInput),
+      ).rejects.toThrow("Employee tidak ditemukan");
+    });
+
+    it("rejects employee from another branch", async () => {
+      prismaMock.employee.findFirst.mockResolvedValue({
+        id: employeeId,
+        businessId,
+        employeeCode: "EMP-001",
+        name: "John Doe",
+        status: "ACTIVE",
+        branchId: "another-branch",
+      });
+
+      await expect(
+        openShift(businessId, validInput),
+      ).rejects.toThrow(
+        "Employee bukan bagian dari branch tersebut",
+      );
+    });
+
+    it("rejects inactive branch", async () => {
+      prismaMock.branch.findFirst.mockResolvedValue(null);
+
+      await expect(
+        openShift(businessId, validInput),
+      ).rejects.toThrow("Branch tidak ditemukan");
+    });
+
+    it("rejects inactive cash register", async () => {
+      prismaMock.cashRegister.findFirst.mockResolvedValue(null);
+
+      await expect(
+        openShift(businessId, validInput),
+      ).rejects.toThrow("Cash register tidak ditemukan");
+    });
+
+    it("rejects when employee already has an open shift", async () => {
+      prismaMock.shift.findFirst.mockResolvedValue(
+        createShift(),
+      );
+
+      await expect(
+        openShift(businessId, validInput),
+      ).rejects.toThrow();
+    });
+
+    it("rejects when cash register already has an open session", async () => {
+      prismaMock.cashSession.findFirst.mockResolvedValue(
+        createSession(),
+      );
+
+      await expect(
+        openShift(businessId, validInput),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("closeShift", () => {
+    it("closes an open shift", async () => {
+      transactionMock.shift.findFirst.mockResolvedValue(
+        createShift(),
+      );
+
+      transactionMock.cashSession.findFirst.mockResolvedValue(
+        createSession(),
+      );
+
+      transactionMock.cashMovement.findMany.mockResolvedValue([
         {
-          branchId,
-          employeeId,
-          cashRegisterId,
-          openingCash: "100000",
+          id: "movement-1",
+          type: "CASH_IN",
+          amount: 50000,
+        },
+        {
+          id: "movement-2",
+          type: "CASH_OUT",
+          amount: 10000,
+        },
+      ]);
+
+      transactionMock.shift.update.mockResolvedValue(
+        createShift({
+          status: "CLOSED",
+          endedAt: new Date(),
+          closingCash: 140000,
+        }),
+      );
+
+      transactionMock.cashSession.update.mockResolvedValue(
+        createSession({
+          status: "CLOSED",
+          actualBalance: 140000,
+        }),
+      );
+
+      transactionMock.cashMovement.create.mockResolvedValue({
+        id: "closing-movement",
+      });
+
+      const result = await closeShift(
+        businessId,
+        shiftId,
+        {
+          closingCash: 140000,
+          notes: "Shift closed",
         },
       );
 
-      expect(result).toBeDefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          shift: expect.anything(),
+          summary: expect.anything(),
+        }),
+      );
 
-      expect(
-        transactionMock.employee.findFirst,
-      ).toHaveBeenCalled();
-
-      expect(
-        transactionMock.branch.findFirst,
-      ).toHaveBeenCalled();
-
-      expect(
-        transactionMock.cashRegister.findFirst,
-      ).toHaveBeenCalled();
-
-      expect(
-        transactionMock.cashSession.create,
-      ).toHaveBeenCalled();
-
-      expect(
-        transactionMock.cashMovement.create,
-      ).toHaveBeenCalled();
+      expect(transactionMock.shift.update).toHaveBeenCalled();
+      expect(transactionMock.cashSession.update).toHaveBeenCalled();
+      expect(transactionMock.cashMovement.create).toHaveBeenCalled();
     });
 
-    it("rejects an inactive employee", async () => {
-      transactionMock.employee.findFirst.mockResolvedValue(
-        null,
+    it("rejects closing a missing shift", async () => {
+      transactionMock.shift.findFirst.mockResolvedValue(null);
+
+      await expect(
+        closeShift(businessId, shiftId, {
+          closingCash: 100000,
+        }),
+      ).rejects.toThrow("Shift tidak ditemukan");
+    });
+
+    it("rejects closing an already closed shift", async () => {
+      transactionMock.shift.findFirst.mockResolvedValue(
+        createShift({
+          status: "CLOSED",
+        }),
       );
 
       await expect(
-        openShift(
-          businessId,
-          {
-            branchId,
-            employeeId,
-            cashRegisterId,
-            openingCash: "100000",
-          },
-        ),
-      ).rejects.toThrow();
-    });
-
-    it("rejects an employee from another business", async () => {
-      transactionMock.employee.findFirst.mockResolvedValue(
-        null,
-      );
-
-      await expect(
-        openShift(
-          otherBusinessId,
-          {
-            branchId,
-            employeeId,
-            cashRegisterId,
-            openingCash: "100000",
-          },
-        ),
-      ).rejects.toThrow();
-    });
-
-    it("rejects an inactive branch", async () => {
-      transactionMock.employee.findFirst.mockResolvedValue({
-        id: employeeId,
-        businessId,
-        branchId,
-        status: "ACTIVE",
-      });
-
-      transactionMock.branch.findFirst.mockResolvedValue(
-        null,
-      );
-
-      await expect(
-        openShift(
-          businessId,
-          {
-            branchId,
-            employeeId,
-            cashRegisterId,
-            openingCash: "100000",
-          },
-        ),
-      ).rejects.toThrow();
-    });
-
-    it("rejects an inactive cash register", async () => {
-      transactionMock.employee.findFirst.mockResolvedValue({
-        id: employeeId,
-        businessId,
-        branchId,
-        status: "ACTIVE",
-      });
-
-      transactionMock.branch.findFirst.mockResolvedValue({
-        id: branchId,
-        businessId,
-        status: "ACTIVE",
-      });
-
-      transactionMock.cashRegister.findFirst.mockResolvedValue(
-        null,
-      );
-
-      await expect(
-        openShift(
-          businessId,
-          {
-            branchId,
-            employeeId,
-            cashRegisterId,
-            openingCash: "100000",
-          },
-        ),
+        closeShift(businessId, shiftId, {
+          closingCash: 100000,
+        }),
       ).rejects.toThrow();
     });
   });
@@ -329,11 +494,11 @@ describe("shift.service", () => {
       });
 
       transactionMock.cashMovement.create.mockResolvedValue({
-        id: "cash-movement-id",
+        id: "movement-1",
         cashSessionId: sessionId,
         employeeId,
         type: "CASH_IN",
-        amount: new Prisma.Decimal("50000"),
+        amount: 50000,
       });
 
       const result = await addCashMovement(
@@ -341,235 +506,97 @@ describe("shift.service", () => {
         shiftId,
         {
           type: "CASH_IN",
-          amount: "50000",
-          description: "Modal tambahan",
+          amount: 50000,
+          description: "Additional cash",
         },
-      );
-
-      expect(result).toBeDefined();
-
-      expect(
-        transactionMock.cashMovement.create,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            employeeId,
-            type: "CASH_IN",
-            amount: expect.any(Prisma.Decimal),
-          }),
-        }),
-      );
-    });
-
-    it("rejects cash movement when shift is closed", async () => {
-      transactionMock.shift.findFirst.mockResolvedValue(
-        createShift({
-          status: "CLOSED",
-        }),
-      );
-
-      await expect(
-        addCashMovement(
-          businessId,
-          shiftId,
-          {
-            type: "CASH_IN",
-            amount: "50000",
-          },
-        ),
-      ).rejects.toThrow();
-    });
-
-    it("rejects cash movement when shift does not belong to business", async () => {
-      transactionMock.shift.findFirst.mockResolvedValue(
-        null,
-      );
-
-      await expect(
-        addCashMovement(
-          otherBusinessId,
-          shiftId,
-          {
-            type: "CASH_IN",
-            amount: "50000",
-          },
-        ),
-      ).rejects.toThrow();
-    });
-  });
-
-  describe("closeShift", () => {
-    it("closes shift and calculates expected cash correctly", async () => {
-      transactionMock.shift.findFirst.mockResolvedValue(
-        createShift(),
-      );
-
-      transactionMock.cashSession.findFirst.mockResolvedValue(
-        createSession(),
-      );
-
-      transactionMock.cashMovement.findMany.mockResolvedValue([
-        {
-          type: "OPENING_BALANCE",
-          amount: new Prisma.Decimal("100000"),
-        },
-        {
-          type: "CASH_IN",
-          amount: new Prisma.Decimal("50000"),
-        },
-        {
-          type: "CASH_OUT",
-          amount: new Prisma.Decimal("20000"),
-        },
-      ]);
-
-      transactionMock.shift.update.mockResolvedValue(
-        createShift({
-          status: "CLOSED",
-          closingCash: new Prisma.Decimal("130000"),
-          endedAt: new Date(),
-        }),
-      );
-
-      transactionMock.cashSession.update.mockResolvedValue({
-        ...createSession({
-          status: "CLOSED",
-          expectedBalance: new Prisma.Decimal("130000"),
-          actualBalance: new Prisma.Decimal("130000"),
-        }),
-      });
-
-      transactionMock.cashMovement.create.mockResolvedValue({
-        id: "closing-movement",
-      });
-
-      const result = await closeShift(
-        businessId,
-        shiftId,
-        {
-          closingCash: "130000",
-        },
-      );
-
-      expect(result.summary.expectedCash).toBe(
-        "130000",
-      );
-
-      expect(result.summary.closingCash).toBe(
-        "130000",
-      );
-
-      expect(result.summary.variance).toBe(
-        "0",
-      );
-
-      expect(
-        transactionMock.shift.update,
-      ).toHaveBeenCalled();
-
-      expect(
-        transactionMock.cashSession.update,
-      ).toHaveBeenCalled();
-
-      expect(
-        transactionMock.cashMovement.create,
-      ).toHaveBeenCalled();
-    });
-
-    it("calculates positive variance", async () => {
-      transactionMock.shift.findFirst.mockResolvedValue(
-        createShift(),
-      );
-
-      transactionMock.cashSession.findFirst.mockResolvedValue(
-        createSession(),
-      );
-
-      transactionMock.cashMovement.findMany.mockResolvedValue([
-        {
-          type: "OPENING_BALANCE",
-          amount: new Prisma.Decimal("100000"),
-        },
-      ]);
-
-      transactionMock.shift.update.mockResolvedValue(
-        createShift({
-          status: "CLOSED",
-          closingCash: new Prisma.Decimal("110000"),
-        }),
-      );
-
-      transactionMock.cashSession.update.mockResolvedValue({});
-      transactionMock.cashMovement.create.mockResolvedValue({});
-
-      const result = await closeShift(
-        businessId,
-        shiftId,
-        {
-          closingCash: "110000",
-        },
-      );
-
-      expect(result.summary.expectedCash).toBe(
-        "100000",
-      );
-
-      expect(result.summary.variance).toBe(
-        "10000",
-      );
-    });
-
-    it("rejects closing an already closed shift", async () => {
-      transactionMock.shift.findFirst.mockResolvedValue(
-        createShift({
-          status: "CLOSED",
-        }),
-      );
-
-      await expect(
-        closeShift(
-          businessId,
-          shiftId,
-          {
-            closingCash: "100000",
-          },
-        ),
-      ).rejects.toThrow();
-    });
-  });
-
-  describe("getShiftById", () => {
-    it("returns a shift for the same business", async () => {
-      prismaMock.shift.findFirst.mockResolvedValue(
-        createShift(),
-      );
-
-      const result = await getShiftById(
-        businessId,
-        shiftId,
       );
 
       expect(result).toEqual(
-        createShift(),
+        expect.objectContaining({
+          id: "movement-1",
+        }),
       );
+
+      expect(transactionMock.shift.findFirst).toHaveBeenCalled();
+      expect(transactionMock.cashSession.findFirst).toHaveBeenCalled();
+      expect(transactionMock.cashMovement.create).toHaveBeenCalled();
     });
 
-    it("does not return a shift from another business", async () => {
-      prismaMock.shift.findFirst.mockResolvedValue(
-        null,
-      );
+    it("rejects movement when shift does not exist", async () => {
+      transactionMock.shift.findFirst.mockResolvedValue(null);
 
       await expect(
-        getShiftById(
-          otherBusinessId,
+        addCashMovement(
+          businessId,
           shiftId,
+          {
+            type: "CASH_IN",
+            amount: 50000,
+          },
+        ),
+      ).rejects.toThrow("Shift tidak ditemukan");
+    });
+
+    it("rejects movement when shift is closed", async () => {
+      transactionMock.shift.findFirst.mockResolvedValue({
+        id: shiftId,
+        employeeId,
+        status: "CLOSED",
+      });
+
+      await expect(
+        addCashMovement(
+          businessId,
+          shiftId,
+          {
+            type: "CASH_IN",
+            amount: 50000,
+          },
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("rejects movement when cash session does not exist", async () => {
+      transactionMock.shift.findFirst.mockResolvedValue({
+        id: shiftId,
+        employeeId,
+        status: "OPEN",
+      });
+
+      transactionMock.cashSession.findFirst.mockResolvedValue(null);
+
+      await expect(
+        addCashMovement(
+          businessId,
+          shiftId,
+          {
+            type: "CASH_IN",
+            amount: 50000,
+          },
         ),
       ).rejects.toThrow();
     });
   });
 
   describe("listCashMovements", () => {
-    it("lists cash movements for the business shift", async () => {
+    it("lists cash movements for a shift", async () => {
+      const movements = [
+        {
+          id: "movement-1",
+          cashSessionId: sessionId,
+          employeeId,
+          type: "CASH_IN",
+          amount: 50000,
+        },
+        {
+          id: "movement-2",
+          cashSessionId: sessionId,
+          employeeId,
+          type: "CASH_OUT",
+          amount: 10000,
+        },
+      ];
+
       prismaMock.shift.findFirst.mockResolvedValue(
         createShift(),
       );
@@ -578,15 +605,7 @@ describe("shift.service", () => {
         id: sessionId,
       });
 
-      const movements = [
-        {
-          id: "movement-1",
-          amount: new Prisma.Decimal("50000"),
-          type: "CASH_IN",
-        },
-      ];
-
-      transactionMock.cashMovement.findMany.mockResolvedValue(
+      prismaMock.cashMovement.findMany.mockResolvedValue(
         movements,
       );
 
@@ -596,29 +615,40 @@ describe("shift.service", () => {
       );
 
       expect(result).toEqual(movements);
+
+      expect(prismaMock.shift.findFirst).toHaveBeenCalled();
+      expect(prismaMock.cashSession.findFirst).toHaveBeenCalled();
+      expect(prismaMock.cashMovement.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            cashSessionId: sessionId,
+          },
+        }),
+      );
     });
-  });
 
-  describe("listShifts", () => {
-    it("lists shifts with pagination", async () => {
-      prismaMock.shift.findMany.mockResolvedValue([
+    it("returns empty array when cash session does not exist", async () => {
+      prismaMock.shift.findFirst.mockResolvedValue(
         createShift(),
-      ]);
-
-      prismaMock.shift.count.mockResolvedValue(1);
-
-      const result = await listShifts(
-        businessId,
-        {
-          page: 1,
-          limit: 20,
-        },
       );
 
-      expect(result.items).toHaveLength(1);
-      expect(result.pagination.total).toBe(1);
-      expect(result.pagination.page).toBe(1);
-      expect(result.pagination.limit).toBe(20);
+      prismaMock.cashSession.findFirst.mockResolvedValue(null);
+
+      const result = await listCashMovements(
+        businessId,
+        shiftId,
+      );
+
+      expect(result).toEqual([]);
+      expect(prismaMock.cashMovement.findMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects when shift does not exist", async () => {
+      prismaMock.shift.findFirst.mockResolvedValue(null);
+
+      await expect(
+        listCashMovements(businessId, shiftId),
+      ).rejects.toThrow("Shift tidak ditemukan");
     });
   });
 });

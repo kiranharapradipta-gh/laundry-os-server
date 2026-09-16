@@ -13,6 +13,7 @@ import customerTagRoutes from "./modules/customer-tags/customer-tag.routes.js";
 import customerSegmentRoutes from "./modules/customer-segments/customer-segment.routes.js";
 import inventoryRoutes from "./modules/inventory/inventory.routes.js";
 import shiftRoutes from "./modules/shift/shift.routes.js";
+import employeeRoutes from "./modules/employees/employee.routes.js";
 
 export const app = express();
 
@@ -31,6 +32,7 @@ app.use("/api/customer-tags", customerTagRoutes);
 app.use("/api/customer-segments", customerSegmentRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/shifts", shiftRoutes);
+app.use("/api/employees", employeeRoutes);
 
 /*
  * 404
