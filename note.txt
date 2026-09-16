@@ -1,0 +1,3 @@
+https://raw.githubusercontent.com/kiranharapradipta-gh/laundry-os-server/main/src/modules/inventory/inventory.routes.ts
+https://raw.githubusercontent.com/kiranharapradipta-gh/laundry-os-server/main/src/modules/inventory/inventory.controller.ts
+https://raw.githubusercontent.com/kiranharapradipta-gh/laundry-os-server/main/src/modules/inventory/inventory.validation.ts

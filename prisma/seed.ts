@@ -1,4 +1,7 @@
+import "dotenv/config";
+
 import { PrismaPg } from "@prisma/adapter-pg";
+
 import {
   PrismaClient,
   Prisma,
@@ -121,6 +124,15 @@ async function main() {
     "inventory.delete",
     "inventory.adjust",
     "inventory.manage",
+
+    /*
+    * Shifts
+    */
+    "shift.read",
+    "shift.open",
+    "shift.close",
+    "shift.cash.read",
+    "shift.cash.adjust",
 
     /*
     * Delivery
@@ -370,6 +382,12 @@ async function main() {
         "complaint.read",
         "complaint.create",
         "complaint.update",
+
+        "shift.read",
+        "shift.open",
+        "shift.close",
+        "shift.cash.read",
+        "shift.cash.adjust",
       ],
     },
   ];

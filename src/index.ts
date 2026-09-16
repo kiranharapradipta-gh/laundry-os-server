@@ -12,6 +12,7 @@ import customerRoutes from "./modules/customers/customer.routes.js";
 import customerTagRoutes from "./modules/customer-tags/customer-tag.routes.js";
 import customerSegmentRoutes from "./modules/customer-segments/customer-segment.routes.js";
 import inventoryRoutes from "./modules/inventory/inventory.routes.js";
+import shiftRoutes from "./modules/shift/shift.routes.js";
 
 export const app = express();
 
@@ -25,26 +26,11 @@ app.use(httpLoggerMiddleware);
  * Routes
  */
 app.use("/api/auth", authRoutes);
-
-app.use(
-  "/api/customers",
-  customerRoutes,
-);
-
-app.use(
-  "/api/customer-tags",
-  customerTagRoutes,
-);
-
-app.use(
-  "/api/customer-segments",
-  customerSegmentRoutes,
-);
-
-app.use(
-  "/api/inventory",
-  inventoryRoutes,
-);
+app.use("/api/customers", customerRoutes);
+app.use("/api/customer-tags", customerTagRoutes);
+app.use("/api/customer-segments", customerSegmentRoutes);
+app.use("/api/inventory", inventoryRoutes);
+app.use("/api/shifts", shiftRoutes);
 
 /*
  * 404

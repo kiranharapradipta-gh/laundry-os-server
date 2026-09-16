@@ -87,7 +87,7 @@ const createItem = (
   unit: "kg",
   currentStock: new Prisma.Decimal("10"),
   minimumStock: new Prisma.Decimal("5"),
-  maximumStock: null,
+  maximumStock: new Prisma.Decimal("50"),
   costPrice: new Prisma.Decimal("15000"),
   active: true,
   createdAt: new Date("2026-01-01"),
@@ -98,40 +98,39 @@ const createItem = (
 beforeEach(() => {
   vi.clearAllMocks();
 
-  transactionMock.$queryRaw.mockResolvedValue([
-    {
-      id: itemId,
-      businessId,
-      branchId: null,
-      sku: "DET-001",
-      name: "Detergent",
-      description: null,
-      unit: "kg",
-      currentStock: new Prisma.Decimal("10"),
-      minimumStock: new Prisma.Decimal("5"),
-      maximumStock: new Prisma.Decimal("50"),
-      costPrice: new Prisma.Decimal("15000"),
-      active: true,
+  /*
+   * Support both Prisma transaction styles:
+   *
+   * prisma.$transaction(async tx => {})
+   * prisma.$transaction([query1, query2])
+   */
+  prismaMock.$transaction.mockImplementation(
+    async (input: unknown) => {
+      if (typeof input === "function") {
+        return input(transactionMock);
+      }
+
+      if (Array.isArray(input)) {
+        return Promise.all(input);
+      }
+
+      throw new Error(
+        "Unsupported $transaction mock input",
+      );
     },
-  ]);
+  );
 
-  prismaMock.$transaction.mockImplementation(async (input: unknown) => {
-    if (typeof input === "function") {
-      return input(transactionMock);
-    }
-
-    if (Array.isArray(input)) {
-      return Promise.all(input);
-    }
-
-    throw new Error("Unsupported $transaction mock input");
-  });
-
+  /*
+   * Default branch.
+   */
   prismaMock.branch.findFirst.mockResolvedValue({
     id: branchId,
     name: "Main Branch",
   });
 
+  /*
+   * Default inventory queries.
+   */
   prismaMock.inventoryItem.findFirst.mockResolvedValue(
     createItem(),
   );
@@ -140,9 +139,9 @@ beforeEach(() => {
     null,
   );
 
-  prismaMock.inventoryItem.findMany.mockResolvedValue(
-    [createItem()],
-  );
+  prismaMock.inventoryItem.findMany.mockResolvedValue([
+    createItem(),
+  ]);
 
   prismaMock.inventoryItem.count.mockResolvedValue(1);
 
@@ -153,6 +152,13 @@ beforeEach(() => {
   prismaMock.inventoryItem.update.mockResolvedValue(
     createItem(),
   );
+
+  /*
+   * Default FOR UPDATE result used by stock mutations.
+   */
+  transactionMock.$queryRaw.mockResolvedValue([
+    createItem(),
+  ]);
 
   transactionMock.inventoryItem.findFirst.mockResolvedValue(
     createItem(),
@@ -183,18 +189,19 @@ beforeEach(() => {
     },
   );
 
-  prismaMock.inventoryTransaction.findMany.mockResolvedValue(
-    [
-      {
-        id: "transaction-1",
-        inventoryItemId: itemId,
-        type: "PURCHASE",
-        quantity: new Prisma.Decimal("5"),
-        beforeStock: new Prisma.Decimal("10"),
-        afterStock: new Prisma.Decimal("15"),
-      },
-    ],
-  );
+  /*
+   * Default transaction history.
+   */
+  prismaMock.inventoryTransaction.findMany.mockResolvedValue([
+    {
+      id: "transaction-1",
+      inventoryItemId: itemId,
+      type: "PURCHASE",
+      quantity: new Prisma.Decimal("5"),
+      beforeStock: new Prisma.Decimal("10"),
+      afterStock: new Prisma.Decimal("15"),
+    },
+  ]);
 });
 
 describe("Inventory Service", () => {
@@ -242,14 +249,13 @@ describe("Inventory Service", () => {
 
       expect(
         prismaMock.inventoryItem.findFirst,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            id: itemId,
-            businessId: otherBusinessId,
-          },
-        }),
-      );
+      ).toHaveBeenCalledWith({
+        where: {
+          id: itemId,
+          businessId: otherBusinessId,
+        },
+        select: expect.any(Object),
+      });
     });
   });
 
@@ -279,9 +285,12 @@ describe("Inventory Service", () => {
             sku: "DET-001",
             name: "Detergent",
             unit: "kg",
-            minimumStock: new Prisma.Decimal("5"),
-            maximumStock: new Prisma.Decimal("50"),
-            costPrice: new Prisma.Decimal("15000"),
+            minimumStock:
+              new Prisma.Decimal("5"),
+            maximumStock:
+              new Prisma.Decimal("50"),
+            costPrice:
+              new Prisma.Decimal("15000"),
           }),
           select: expect.any(Object),
         }),
@@ -289,11 +298,9 @@ describe("Inventory Service", () => {
     });
 
     it("rejects duplicate SKU", async () => {
-      prismaMock.inventoryItem.findUnique.mockResolvedValue(
-        {
-          id: "existing-item",
-        },
-      );
+      prismaMock.inventoryItem.findUnique.mockResolvedValue({
+        id: "existing-item",
+      });
 
       await expect(
         createInventoryItem(
@@ -579,25 +586,36 @@ describe("Inventory Service", () => {
     });
 
     it("rejects stock out for another business item", async () => {
-      transactionMock.$queryRaw.mockResolvedValueOnce([
-        {
-          ...lockedInventoryItem,
-          businessId: "22222222-2222-4222-8222-222222222222",
-        },
-      ]);
+      /*
+       * getLockedInventoryItem() includes businessId
+       * in its WHERE clause.
+       *
+       * Therefore an item belonging to another
+       * business returns an empty result.
+       */
+      transactionMock.$queryRaw.mockResolvedValueOnce(
+        [],
+      );
 
       await expect(
-        inventoryService.stockOut(
-          inventoryItemId,
+        stockOut(
           businessId,
+          itemId,
           {
-            quantity: 5,
-            type: "PURCHASE",
+            quantity: "5",
           },
         ),
       ).rejects.toThrow(
         "Inventory item tidak ditemukan",
       );
+
+      expect(
+        transactionMock.inventoryItem.update,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        transactionMock.inventoryTransaction.create,
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -615,7 +633,10 @@ describe("Inventory Service", () => {
         );
 
       expect(result.changed).toBe(true);
-      expect(result.delta.toString()).toBe("5");
+      expect(
+        result.delta.toString(),
+      ).toBe("5");
+
       expect(result.type).toBe(
         "ADJUSTMENT_IN",
       );
@@ -672,7 +693,10 @@ describe("Inventory Service", () => {
         );
 
       expect(result.changed).toBe(true);
-      expect(result.delta.toString()).toBe("3");
+      expect(
+        result.delta.toString(),
+      ).toBe("3");
+
       expect(result.type).toBe(
         "ADJUSTMENT_OUT",
       );
@@ -686,6 +710,18 @@ describe("Inventory Service", () => {
         data: {
           currentStock:
             new Prisma.Decimal("7"),
+        },
+      });
+
+      expect(
+        transactionMock.stockAdjustment.create,
+      ).toHaveBeenCalledWith({
+        data: {
+          inventoryItemId: itemId,
+          quantity:
+            new Prisma.Decimal("3"),
+          reason: "DAMAGED",
+          notes: null,
         },
       });
     });
@@ -702,7 +738,11 @@ describe("Inventory Service", () => {
         );
 
       expect(result.changed).toBe(false);
-      expect(result.delta.toString()).toBe("0");
+
+      expect(
+        result.delta.toString(),
+      ).toBe("0");
+
       expect(result.type).toBeNull();
       expect(result.transaction).toBeNull();
       expect(result.adjustment).toBeNull();
@@ -854,33 +894,78 @@ describe("Inventory Service", () => {
     });
 
     it("filters low stock items", async () => {
-      const lowStockItem = {
-        ...inventoryItem,
-        currentStock: new Prisma.Decimal("3"),
-        minimumStock: new Prisma.Decimal("5"),
-      };
+      const lowStockItem = createItem({
+        currentStock:
+          new Prisma.Decimal("3"),
+        minimumStock:
+          new Prisma.Decimal("5"),
+      });
 
+      /*
+       * Low-stock implementation performs:
+       *
+       * 1. $queryRaw -> IDs
+       * 2. $queryRaw -> COUNT
+       * 3. inventoryItem.findMany -> full rows
+       */
       prismaMock.$queryRaw
         .mockResolvedValueOnce([
-          lowStockItem,
+          {
+            id: itemId,
+          },
         ])
         .mockResolvedValueOnce([
-          { total: BigInt(1) },
+          {
+            total: BigInt(1),
+          },
         ]);
 
-      const result = await inventoryService.listInventoryItems(
-        businessId,
-        {
-          page: 1,
-          limit: 20,
-          lowStock: true,
-        },
+      prismaMock.inventoryItem.findMany.mockResolvedValueOnce(
+        [lowStockItem],
       );
 
+      const result =
+        await listInventoryItems(
+          businessId,
+          {
+            page: 1,
+            limit: 20,
+            lowStock: true,
+          },
+        );
+
       expect(result.items).toHaveLength(1);
+
       expect(
         result.items[0].currentStock.toString(),
       ).toBe("3");
+
+      expect(
+        result.items[0].minimumStock.toString(),
+      ).toBe("5");
+
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 20,
+        total: 1,
+        totalPages: 1,
+      });
+
+      expect(
+        prismaMock.$queryRaw,
+      ).toHaveBeenCalledTimes(2);
+
+      expect(
+        prismaMock.inventoryItem.findMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: {
+              in: [itemId],
+            },
+          },
+        }),
+      );
     });
   });
 });

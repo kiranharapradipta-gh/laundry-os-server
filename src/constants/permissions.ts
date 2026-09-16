@@ -28,6 +28,13 @@ export const PERMISSIONS = {
   INVENTORY_DELETE: "inventory.delete",
   INVENTORY_ADJUST: "inventory.adjust",
 
+  // Shifts
+  SHIFT_READ: "shift.read",
+  SHIFT_OPEN: "shift.open",
+  SHIFT_CLOSE: "shift.close",
+  SHIFT_CASH_READ: "shift.cash.read",
+  SHIFT_CASH_ADJUST: "shift.cash.adjust",
+
   // Finance
   FINANCE_READ: "finance.read",
   FINANCE_CREATE: "finance.create",
